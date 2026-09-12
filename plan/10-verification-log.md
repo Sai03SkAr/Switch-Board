@@ -56,3 +56,31 @@ Re-run the table above and add a Run 2 section. Do not edit Run 1 — append.
 - [monid.ai](https://monid.ai/) homepage, 8 Sep 2026
 - [Monid docs index](https://monid.ai/docs/llms.txt), 8 Sep 2026
 - Baseline: [Notis review](https://www.notis.ai/blog/monid-review/), 19 Aug 2026
+
+---
+
+## Ready-to-run: the account-gated tests (not yet executed)
+
+Two claims from [02-weaknesses.md](02-weaknesses.md) still need a Monid account to
+confirm — creating third-party accounts isn't something Claude does even on request, so
+this is queued for whenever it's convenient. Five minutes, their own $1 free credit, no
+card required per their docs.
+
+**Test A — price-blind ranking (the 26× inversion):**
+1. Sign up at [monid.ai](https://monid.ai/)
+2. Call `POST /discover` with a query for a task where you expect multiple candidate
+   endpoints at different prices — e.g. `"get current exchange rate"` or
+   `"get current weather for a city"`
+3. Check the response: does the **cheapest** viable candidate rank **first**? Or does a
+   pricier option outrank a cheaper one for the same task?
+4. Save the raw JSON response
+
+**Test B — per-key spend caps:**
+1. In the dashboard, go to API key management / settings
+2. Look for a per-key budget limit, spend cap, or usage ceiling field
+3. Note whether one exists, and if so, what it lets you configure
+4. Screenshot the key settings page
+
+**When this gets run:** paste the raw `/discover` JSON and the settings screenshot into a
+conversation, and both claims in [02-weaknesses.md](02-weaknesses.md) get updated from
+"unverified" to a dated, evidenced verdict — same standard as everything else in this log.
