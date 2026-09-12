@@ -4,4 +4,5 @@ export * from "./embeddings.js";
 export * from "./discovery.js";
 export * from "./ledger.js";
 export * from "./upstream.js";
+export * from "./policy.js";
 export * from "./executor.js";

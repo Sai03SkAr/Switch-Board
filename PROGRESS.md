@@ -10,11 +10,13 @@ and treat this file as needing an update.
 
 ## Right now
 
-**Phase:** 2 (the ledger) — **✅ COMPLETE.** Moving to Phase 3 (policy engine & budgets) next.
-**Last verified state:** 55/55 tests passing, live against local Postgres, database left
-completely clean (only the 2 system accounts, zero debris) after the full suite runs.
-Full end-to-end HTTP flow manually verified against the running API, including two
-genuinely real upstream calls over the internet (api.weather.gov, api.frankfurter.dev).
+**Phase:** 3 (policy engine & budgets) — **✅ COMPLETE.** Moving to Phase 4 (MCP server & CLI) next.
+**Last verified state:** 61/61 tests passing, live against local Postgres, database left
+completely clean after the full suite runs. Full budget/confirmation flow manually
+verified against the running API over live HTTP — 409-with-token, single-use token
+enforcement, and 402-with-scope-details all confirmed working, including against a
+genuinely real (and genuinely failed, 401 — no paid credentials exist, expected) call to
+CoinGecko's live API, proving the zero-charge-on-failure guarantee holds even there.
 
 ## How to resume in a fresh session
 
@@ -149,8 +151,65 @@ session → call), built on top of the `accounts`/`holds` this phase created.
   need paid keys nobody has entered). The executor will be built key-ready but Phase 2
   testing exercises it against the mock server, not live paid calls.
 
-### ⬜ Phase 3 — Policy engine & budgets
-Not started. Depends on Phase 2's `accounts`/`holds` tables.
+### ✅ Phase 3 — Policy engine & budgets — COMPLETE
+
+**Goal (from `plan/07-roadmap.md`):** the project's headline differentiator — a
+workspace → key → session → call budget hierarchy, versus a single undifferentiated
+balance (the exact gap in `plan/02-weaknesses.md` #2). **All built, tested, verified live.**
+
+**All 4 acceptance criteria met:**
+- [x] **The headline demo, as an automated test**: an agent in a retry loop hits a
+      session budget cap and stops, workspace balance untouched beyond the cap —
+      `policy.test.ts`, a real 10-iteration retry loop against a $774-capped session,
+      exactly 3 calls succeed, balance drops by exactly 774 micros, not a penny more
+- [x] Each of the 4 scopes blocks independently and reports which one tripped — proven
+      both in unit tests and live over HTTP (`BUDGET_EXCEEDED` names `scope`, `window`,
+      `limit_micros`, `spent_micros`, `would_cost_micros` exactly)
+- [x] A call above a confirmation threshold returns 409 with a token, succeeds on
+      replay — proven live: real HTTP 409, real token, real successful replay, and a
+      reused token correctly denied with a **fresh** token issued
+- [x] `dry_run` returns an accurate estimate and moves no money — already covered in
+      Phase 2's executor tests, unaffected by this phase's changes
+
+**What exists:**
+- Migration `004_phase3_policy.sql` — `api_keys` (minimal — see the auth note below),
+  `budgets`, `confirmation_tokens`, plus `session_id`/`key_id` columns added to `runs`
+- `packages/core/src/policy.ts` — `evaluatePolicy()` (call → session → key → workspace
+  order, narrowest first), `consumeConfirmationToken()` (atomic, race-safe single-use)
+- Wired into `packages/core/src/executor.ts`'s `run()`: policy runs before any hold is
+  taken, using the same conservative `maxPossibleMicros` figure the ledger reserves
+  against — a budget check looser than the actual hold would be internally inconsistent
+- REST: `GET/POST /v1/budgets`, `DELETE /v1/budgets/:id`, and `/v1/run` now accepts
+  `session_id`/`key_id`/`confirmation_token` and returns `402 BUDGET_EXCEEDED` /
+  `409 CONFIRMATION_REQUIRED` with the exact detail shape from `plan/06-api-spec.md`
+- **61/61 tests passing** (6 new in `policy.test.ts`), stable across many consecutive runs
+- **Manually verified end-to-end over live HTTP**: 409+token, single-use enforcement (a
+  reused token is denied and issued a fresh one, not silently accepted), 402 with full
+  scope detail, and — notably — a real call to CoinGecko's live API that genuinely failed
+  with a 401 (no paid credentials exist in this environment, expected) still correctly
+  charged **zero**, proving Phase 2's zero-charge-on-failure guarantee holds against a
+  real upstream failure, not just a scripted mock
+
+**Deliberate scope decision, not a gap:** `budgets` spend is DERIVED by querying `runs`
+directly (`SUM(actual_micros)` for succeeded runs in scope+window) rather than
+maintaining a `budget_usage` cache table as `plan/05-data-model.md` originally proposed.
+Same principle the ledger itself uses (see `ledger.ts`'s doc comment) — a derived sum
+avoids an entire class of "did every code path correctly increment the cache" bugs, and
+there is no performance reason yet to accept that risk at this project's scale.
+
+**Not built this phase, deliberately deferred (small, not acceptance-critical):**
+allow/deny lists per key, and rate limiting — both listed in the roadmap's Phase 3
+deliverables but not required by any of the 4 acceptance criteria. Worth adding before
+Phase 8 if time allows; noted here so they aren't mistaken for forgotten rather than
+deferred.
+
+**Known simplification carried over from Phase 2, unchanged:** REST endpoints still take
+`workspace_id`/`key_id`/`session_id` directly in the request rather than Bearer-token
+auth — still correctly deferred to Phase 4, where a real caller identity is what the CLI
+and MCP server actually need to wire up.
+
+**Next step:** Phase 4 — the MCP server (three tools: `discover`, `inspect`, `run`) and
+the CLI, both as thin adapters over the REST API this and the previous two phases built.
 
 ### ⬜ Phase 4 — MCP server & CLI
 Not started. Thin adapter over the REST API from Phases 1–3 — should be quick once they exist.

@@ -13,6 +13,8 @@ import {
   InsufficientFundsError,
   EndpointNotFoundError,
   ValidationError,
+  BudgetExceededError,
+  ConfirmationRequiredError,
   type PricingModel,
 } from "@switchboard/core";
 
@@ -225,9 +227,17 @@ app.get<{ Querystring: { workspace_id: string } }>("/v1/wallet/activities", asyn
 
 // ---------- POST /v1/run — the money path ----------
 app.post<{
-  Body: { endpoint_id: string; args: Record<string, unknown>; workspace_id: string; dry_run?: boolean };
+  Body: {
+    endpoint_id: string;
+    args: Record<string, unknown>;
+    workspace_id: string;
+    dry_run?: boolean;
+    session_id?: string;
+    key_id?: string;
+    confirmation_token?: string;
+  };
 }>("/v1/run", async (req, reply) => {
-  const { endpoint_id, args, workspace_id, dry_run } = req.body ?? {};
+  const { endpoint_id, args, workspace_id, dry_run, session_id, key_id, confirmation_token } = req.body ?? {};
   if (!endpoint_id || !workspace_id) {
     return reply.status(400).send({ error: { code: "INVALID_REQUEST", message: "endpoint_id and workspace_id are required" } });
   }
@@ -248,6 +258,9 @@ app.post<{
       accountId,
       revenueAccountId: await getRevenueAccountId(),
       dryRun: dry_run,
+      sessionId: session_id,
+      keyId: key_id,
+      confirmationToken: confirmation_token,
     });
 
     return {
@@ -270,10 +283,91 @@ app.post<{
       return reply.status(400).send({ error: { code: "INVALID_ARGS", message: err.message, details: err.details } });
     }
     if (err instanceof InsufficientFundsError) {
-      return reply.status(402).send({ error: { code: "INSUFFICIENT_FUNDS", message: err.message } });
+      return reply.status(402).send({ error: { code: "INSUFFICIENT_FUNDS", message: err.message, details: { charged_micros: 0 } } });
+    }
+    if (err instanceof BudgetExceededError) {
+      // 402: matches plan/06-api-spec.md's BUDGET_EXCEEDED shape — names WHICH scope
+      // tripped, the direct fix for plan/02-weaknesses.md #2 ("one balance, no per-key
+      // caps, no way to tell what happened when it runs out").
+      return reply.status(402).send({
+        error: {
+          code: "BUDGET_EXCEEDED",
+          message: err.message,
+          details: {
+            scope: err.decision.scope,
+            window: err.decision.window,
+            limit_micros: err.decision.limitMicros,
+            spent_micros: err.decision.spentMicros,
+            would_cost_micros: err.decision.wouldCostMicros,
+          },
+        },
+      });
+    }
+    if (err instanceof ConfirmationRequiredError) {
+      // 409: matches plan/06-api-spec.md's CONFIRMATION_REQUIRED shape exactly — replay
+      // the identical call with confirmation_token to proceed.
+      return reply.status(409).send({
+        error: {
+          code: "CONFIRMATION_REQUIRED",
+          message: err.message,
+          details: {
+            estimated_cost_micros: err.limitMicros,
+            confirmation_token: err.confirmationToken,
+            expires_in_s: err.expiresInSeconds,
+          },
+        },
+      });
     }
     throw err;
   }
+});
+
+// ---------- Budget CRUD — plan/06-api-spec.md, plan/07-roadmap.md Phase 3 ----------
+app.get<{ Querystring: { workspace_id: string } }>("/v1/budgets", async (req, reply) => {
+  const { workspace_id } = req.query;
+  if (!workspace_id) return reply.status(400).send({ error: { code: "INVALID_REQUEST", message: "workspace_id is required" } });
+  const { rows } = await pool.query(
+    "SELECT id, scope, scope_id, limit_micros, window_kind, action FROM budgets WHERE workspace_id = $1 ORDER BY scope, window_kind",
+    [workspace_id]
+  );
+  return {
+    budgets: rows.map(({ window_kind, ...rest }) => ({ ...rest, window: window_kind })),
+  };
+});
+
+app.post<{
+  Body: { workspace_id: string; scope: string; scope_id?: string | null; limit_micros: number; window: string; action?: string };
+}>("/v1/budgets", async (req, reply) => {
+  const { workspace_id, scope, scope_id, limit_micros, window, action } = req.body ?? {};
+  if (!workspace_id || !scope || limit_micros == null || !window) {
+    return reply.status(400).send({ error: { code: "INVALID_REQUEST", message: "workspace_id, scope, limit_micros, and window are required" } });
+  }
+  if ((scope === "key" || scope === "session") && !scope_id) {
+    return reply.status(400).send({ error: { code: "INVALID_REQUEST", message: `scope_id is required for scope "${scope}"` } });
+  }
+  try {
+    const { rows } = await pool.query(
+      `INSERT INTO budgets (workspace_id, scope, scope_id, limit_micros, window_kind, action)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       ON CONFLICT (workspace_id, scope, scope_id, window_kind) DO UPDATE SET limit_micros = EXCLUDED.limit_micros, action = EXCLUDED.action
+       RETURNING id, scope, scope_id, limit_micros, window_kind, action`,
+      [workspace_id, scope, scope_id ?? null, limit_micros, window, action ?? "block"]
+    );
+    const row = rows[0];
+    return reply.status(201).send({ id: row.id, scope: row.scope, scope_id: row.scope_id, limit_micros: row.limit_micros, window: row.window_kind, action: row.action });
+  } catch (err) {
+    if ((err as { code?: string }).code === "23514") {
+      // Postgres CHECK constraint violation — an invalid scope/window/action value.
+      return reply.status(400).send({ error: { code: "INVALID_REQUEST", message: "Invalid scope, window, or action value" } });
+    }
+    throw err;
+  }
+});
+
+app.delete<{ Params: { id: string } }>("/v1/budgets/:id", async (req, reply) => {
+  const result = await pool.query("DELETE FROM budgets WHERE id = $1", [req.params.id]);
+  if (result.rowCount === 0) return reply.status(404).send({ error: { code: "NOT_FOUND", message: "No such budget" } });
+  return reply.status(204).send();
 });
 
 // ---------- GET /v1/runs ----------

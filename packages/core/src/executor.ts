@@ -9,6 +9,7 @@ import type pg from "pg";
 import { estimateCost, type PricingModel } from "./pricing.js";
 import { reserve, capture, release, InsufficientFundsError } from "./ledger.js";
 import { substituteTemplate, type UpstreamClient } from "./upstream.js";
+import { evaluatePolicy, type PolicyDecision } from "./policy.js";
 
 const ajv = new Ajv({ allErrors: true });
 
@@ -26,6 +27,22 @@ export class EndpointNotFoundError extends Error {
   }
 }
 
+export class BudgetExceededError extends Error {
+  constructor(public readonly decision: Extract<PolicyDecision, { decision: "DENY" }>) {
+    super(
+      `${decision.scope} budget exceeded (${decision.window}): ${decision.spentMicros} already spent + ${decision.wouldCostMicros} requested > ${decision.limitMicros} limit`
+    );
+    this.name = "BudgetExceededError";
+  }
+}
+
+export class ConfirmationRequiredError extends Error {
+  constructor(public readonly confirmationToken: string, public readonly limitMicros: number, public readonly expiresInSeconds: number) {
+    super(`This call exceeds a confirmation threshold of ${limitMicros} micros. Retry with this confirmation token to proceed.`);
+    this.name = "ConfirmationRequiredError";
+  }
+}
+
 export interface RunParams {
   endpointId: string;
   args: Record<string, unknown>;
@@ -34,6 +51,9 @@ export interface RunParams {
   accountId: string;
   revenueAccountId: string;
   dryRun?: boolean;
+  keyId?: string | null;
+  sessionId?: string | null;
+  confirmationToken?: string;
 }
 
 export interface RunReceipt {
@@ -95,9 +115,34 @@ export async function run(
   const storePayloads: boolean = workspaceRes.rows[0]?.store_payloads ?? false;
   const argsHash = hashArgs(params.args);
 
+  // Policy check runs BEFORE anything is persisted or reserved — a DENY or
+  // NEEDS_CONFIRMATION leaves exactly as little trace as an invalid-args failure (no run
+  // row, no hold, no charge), the same fail-closed symmetry used throughout this file.
+  // Uses maxPossibleMicros (not the tighter point estimate) because that's the same
+  // conservative figure the ledger reserves against a few lines below — a budget check
+  // that's more permissive than the actual hold would be internally inconsistent.
+  const policy = await evaluatePolicy(
+    pool,
+    {
+      workspaceId: params.workspaceId,
+      keyId: params.keyId,
+      sessionId: params.sessionId,
+      endpointId: params.endpointId,
+      argsHash,
+      estimatedMicros: estimate.maxPossibleMicros,
+    },
+    params.confirmationToken
+  );
+  if (policy.decision === "DENY") {
+    throw new BudgetExceededError(policy);
+  }
+  if (policy.decision === "NEEDS_CONFIRMATION") {
+    throw new ConfirmationRequiredError(policy.confirmationToken, policy.limitMicros, policy.expiresInSeconds);
+  }
+
   const runRes = await pool.query<{ id: string }>(
-    `INSERT INTO runs (workspace_id, endpoint_id, state, idempotency_key, estimated_micros, args_hash, args)
-     VALUES ($1, $2, 'pending', $3, $4, $5, $6)
+    `INSERT INTO runs (workspace_id, endpoint_id, state, idempotency_key, estimated_micros, args_hash, args, session_id, key_id)
+     VALUES ($1, $2, 'pending', $3, $4, $5, $6, $7, $8)
      RETURNING id`,
     [
       params.workspaceId,
@@ -106,6 +151,8 @@ export async function run(
       estimate.maxPossibleMicros,
       argsHash,
       storePayloads ? JSON.stringify(params.args) : null,
+      params.sessionId ?? null,
+      params.keyId ?? null,
     ]
   );
   const runId = runRes.rows[0].id;
