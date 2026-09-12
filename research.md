@@ -1,5 +1,3 @@
-<title>SwitchBoard — Scope and Business Research</title>
-
 # SwitchBoard — Scope and Business Research
 
 **Researched 12 September 2026.** Two questions: how far can this project be pushed, and

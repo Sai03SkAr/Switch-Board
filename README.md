@@ -1,5 +1,3 @@
-<title>SwitchBoard</title>
-
 # SwitchBoard
 
 An agent-native tool router with a governance-first take on Monid: price-aware ranking,

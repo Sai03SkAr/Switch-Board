@@ -1,5 +1,3 @@
-<title>SwitchBoard — Progress</title>
-
 # SwitchBoard — Progress
 
 **Read this file first in any new session.** It's the single source of truth for what's
@@ -12,8 +10,11 @@ and treat this file as needing an update.
 
 ## Right now
 
-**Phase:** 2 (the ledger) — **in progress**, started this session.
-**Last verified state:** Phase 1 complete, 25/25 tests passing, live against local Postgres.
+**Phase:** 2 (the ledger) — **✅ COMPLETE.** Moving to Phase 3 (policy engine & budgets) next.
+**Last verified state:** 55/55 tests passing, live against local Postgres, database left
+completely clean (only the 2 system accounts, zero debris) after the full suite runs.
+Full end-to-end HTTP flow manually verified against the running API, including two
+genuinely real upstream calls over the internet (api.weather.gov, api.frankfurter.dev).
 
 ## How to resume in a fresh session
 
@@ -67,30 +68,32 @@ Done 12 Sep 2026, hardened same day (3 real bugs found and fixed by re-reading t
 17 endpoints/8 providers live in Postgres. `POST /v1/discover`, `POST /v1/inspect`,
 `GET /v1/endpoints` all working. 25 tests passing.
 
-### 🔨 Phase 2 — The ledger — IN PROGRESS
+### ✅ Phase 2 — The ledger — COMPLETE
 
 **Goal (from `plan/07-roadmap.md`):** money moves correctly. `accounts`, `transactions`,
 `ledger_entries`, `holds`, idempotent reserve/capture/release, the hold reaper, the
 executor, `POST /v1/run`, `GET /v1/runs`, `GET /v1/runs/{id}`, `GET /v1/wallet/balance`,
-`GET /v1/wallet/activities`.
+`GET /v1/wallet/activities`. **All built, all tested, all verified live.**
 
-**Acceptance criteria that must all pass before Phase 3 starts** (from the roadmap, this
-is the one phase explicitly gated — "do not proceed with a ledger you do not trust"):
+**All 6 acceptance criteria met** (from the roadmap, this is the one phase explicitly
+gated — "do not proceed with a ledger you do not trust"):
 - [x] 1,000 concurrent reserves against one balance never over-commit — `ledger.concurrency.test.ts`, proven against real Postgres, exactly 100/1000 succeed against a $1.00 balance sized for exactly 100
 - [x] Replayed idempotency key executes once and charges once — for both `reserve` and `capture`, including a cross-account/cross-hold conflict guard added after a real bug (see below)
-- [ ] Upstream 500 leaves the balance changed by exactly 0 micro-dollars — **needs the executor**, not yet built
+- [x] Upstream 500 leaves the balance changed by exactly 0 micro-dollars — `executor.test.ts`, proven with a scripted upstream client
 - [x] Process killed between reserve and capture → reaper restores full balance — `reapExpiredHolds()`, tested
-- [x] Every transaction's ledger entries sum to exactly 0 — enforced by construction (deposit debits external_funding/credits user; capture debits user/credits revenue), independently verified across the whole database after test runs
-- [ ] `dry_run` returns an accurate estimate and moves no money — **needs `POST /v1/run`**, not yet built
+- [x] Every transaction's ledger entries sum to exactly 0 — enforced by construction, independently verified across the whole database after every test run
+- [x] `dry_run` returns an accurate estimate and moves no money — `executor.test.ts`, proven: zero hold, zero run row, zero balance change
 
-**Ledger core is DONE and hardened: `packages/core/src/ledger.ts`** —
-`reserve`/`capture`/`release`/`reapExpiredHolds`/`deposit`/`getAvailableBalance`. Migrations
-`002_phase2_ledger.sql` (workspaces/accounts/transactions/ledger_entries/holds/runs) and
-`003_transactions_hold_id.sql` applied to the live local DB. 41/41 tests passing, verified
-clean across 5+ consecutive full-suite runs with zero leftover debris and zero unbalanced
-transactions.
+**What exists:**
+- `packages/core/src/ledger.ts` — `reserve`/`capture`/`release`/`reapExpiredHolds`/`deposit`/`getAvailableBalance`
+- `packages/core/src/executor.ts` — `run()`: validate → estimate → reserve → call upstream → capture/release, with JSON-Schema validation via ajv
+- `packages/core/src/upstream.ts` — `UpstreamClient` interface, `FetchUpstreamClient` (real HTTP), `substituteTemplate`
+- Migrations `002_phase2_ledger.sql`, `003_transactions_hold_id.sql`, applied to the live local DB
+- REST: `POST /v1/workspaces`, `POST /v1/wallet/deposit`, `GET /v1/wallet/balance`, `GET /v1/wallet/activities`, `POST /v1/run`, `GET /v1/runs`, `GET /v1/runs/{id}`
+- **55/55 tests passing**, verified stable across many consecutive full-suite runs, database always left completely clean afterward (only the 2 system accounts, zero debris, zero unbalanced transactions)
+- **Manually verified end-to-end against the live running API**, including two genuinely real calls out to the internet: `api.weather.gov` (a real, dated weather alert for Santa Barbara County) and `api.frankfurter.dev` (a real, dated $100→€86.27 conversion) — not just mocked tests
 
-**Two real bugs found and fixed while building this, worth knowing about specifically:**
+**Four real bugs found and fixed while building this — worth knowing about specifically:**
 1. **The concurrency lock is genuinely load-bearing, not decorative** — proven by
    temporarily removing `SELECT ... FOR UPDATE` from `reserve()` and watching the 1,000-
    concurrent test fail reliably (109/1000 succeeded against a balance sized for 100 — a
@@ -102,9 +105,20 @@ transactions.
    across two different accounts (or two different holds, in `capture`'s case) would have
    silently returned the WRONG hold's data instead of erroring. Found via a confusing test
    failure (stale hardcoded idempotency keys colliding across repeated test runs — see the
-   header comment in `ledger.test.ts`), root-caused, and fixed properly: both functions now
-   check key ownership unconditionally before doing anything else, and there's a dedicated
-   regression test for cross-account and cross-hold reuse in `ledger.test.ts`.
+   header comment in `ledger.test.ts`), root-caused, and fixed: both functions now check
+   key ownership unconditionally before doing anything else.
+3. **Free ($0) endpoints broke `reserve()` entirely** — `holds.amount_micros CHECK (>0)`
+   is deliberate (a hold should represent real money at risk), but the executor tried to
+   reserve $0 for every free call anyway. More than half the seeded catalogue is
+   genuinely free, so this wasn't an edge case — it was the majority path. Fixed: the
+   executor skips reserve/capture/release entirely when a call's max cost is exactly 0.
+4. **`FetchUpstreamClient` silently mis-parsed real responses** — caught live, not in a
+   unit test: `api.weather.gov` returns `application/geo+json`, and a bare
+   `.includes("application/json")` check missed the standard RFC 6839 `+json`
+   structured-syntax suffix, silently falling back to returning an unparsed string
+   instead of a parsed object. Fixed with `isJsonContentType()`, extracted as its own
+   pure, unit-tested function specifically so this class of bug has a regression test
+   that doesn't depend on hitting the real network again to catch it.
 
 **A design decision made concrete while building, not left as prose** (see the doc
 comment at the top of `ledger.ts`): `plan/05-data-model.md` said "derive balance, don't
@@ -114,10 +128,14 @@ concurrent access. The answer used here: every ledger operation takes
 Postgres serializes concurrent operations on the *same* account while leaving different
 accounts fully independent. This is proven, not assumed (see bug #1 above).
 
-**Next step:** the executor — `validate args → estimate cost → reserve → call upstream →
-capture/release`, then wire it behind `POST /v1/run`, `GET /v1/runs`, `GET /v1/runs/{id}`,
-`GET /v1/wallet/balance`, `GET /v1/wallet/activities`. That's what closes the two
-remaining unchecked boxes above.
+**Known simplification, tracked on purpose, not forgotten:** these REST endpoints accept
+`workspace_id` directly in the request rather than Bearer-token API-key auth —
+`plan/06-api-spec.md` envisions the latter, but the `api_keys` table and auth flow are a
+Phase 4 (CLI/MCP) concern, once Phase 3's policy engine actually needs a real caller
+identity to enforce budgets against. Revisit when Phase 4 starts.
+
+**Next step:** Phase 3 — the policy engine and budget hierarchy (workspace → key →
+session → call), built on top of the `accounts`/`holds` this phase created.
 
 **Design decisions locked in before writing code:**
 - Concurrency safety via a single atomic `UPDATE accounts SET ... WHERE available >= $amount`
