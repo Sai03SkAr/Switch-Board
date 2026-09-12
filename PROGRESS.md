@@ -76,16 +76,48 @@ executor, `POST /v1/run`, `GET /v1/runs`, `GET /v1/runs/{id}`, `GET /v1/wallet/b
 
 **Acceptance criteria that must all pass before Phase 3 starts** (from the roadmap, this
 is the one phase explicitly gated — "do not proceed with a ledger you do not trust"):
-- [ ] 1,000 concurrent reserves against one balance never over-commit
-- [ ] Replayed idempotency key executes once and charges once
-- [ ] Upstream 500 leaves the balance changed by exactly 0 micro-dollars
-- [ ] Process killed between reserve and capture → reaper restores full balance
-- [ ] Every transaction's ledger entries sum to exactly 0
-- [ ] `dry_run` returns an accurate estimate and moves no money
+- [x] 1,000 concurrent reserves against one balance never over-commit — `ledger.concurrency.test.ts`, proven against real Postgres, exactly 100/1000 succeed against a $1.00 balance sized for exactly 100
+- [x] Replayed idempotency key executes once and charges once — for both `reserve` and `capture`, including a cross-account/cross-hold conflict guard added after a real bug (see below)
+- [ ] Upstream 500 leaves the balance changed by exactly 0 micro-dollars — **needs the executor**, not yet built
+- [x] Process killed between reserve and capture → reaper restores full balance — `reapExpiredHolds()`, tested
+- [x] Every transaction's ledger entries sum to exactly 0 — enforced by construction (deposit debits external_funding/credits user; capture debits user/credits revenue), independently verified across the whole database after test runs
+- [ ] `dry_run` returns an accurate estimate and moves no money — **needs `POST /v1/run`**, not yet built
 
-**Status:** schema + reserve/capture/release not yet written this session. Started fresh
-this chapter. **Next step:** write migration `002_phase2_ledger.sql`, then
-`packages/core/src/ledger.ts`.
+**Ledger core is DONE and hardened: `packages/core/src/ledger.ts`** —
+`reserve`/`capture`/`release`/`reapExpiredHolds`/`deposit`/`getAvailableBalance`. Migrations
+`002_phase2_ledger.sql` (workspaces/accounts/transactions/ledger_entries/holds/runs) and
+`003_transactions_hold_id.sql` applied to the live local DB. 41/41 tests passing, verified
+clean across 5+ consecutive full-suite runs with zero leftover debris and zero unbalanced
+transactions.
+
+**Two real bugs found and fixed while building this, worth knowing about specifically:**
+1. **The concurrency lock is genuinely load-bearing, not decorative** — proven by
+   temporarily removing `SELECT ... FOR UPDATE` from `reserve()` and watching the 1,000-
+   concurrent test fail reliably (109/1000 succeeded against a balance sized for 100 — a
+   real 9% over-commit), then confirming the fix resolves it. Restored immediately after.
+2. **`IdempotencyKeyConflictError`** — `idempotency_key` is globally unique by design (a
+   buggy client should never be able to reuse another workspace's key and hijack their
+   hold), but the original `reserve()`/`capture()` replay-lookup didn't check that a found
+   key actually belonged to the account/hold the current call was for. A key reused
+   across two different accounts (or two different holds, in `capture`'s case) would have
+   silently returned the WRONG hold's data instead of erroring. Found via a confusing test
+   failure (stale hardcoded idempotency keys colliding across repeated test runs — see the
+   header comment in `ledger.test.ts`), root-caused, and fixed properly: both functions now
+   check key ownership unconditionally before doing anything else, and there's a dedicated
+   regression test for cross-account and cross-hold reuse in `ledger.test.ts`.
+
+**A design decision made concrete while building, not left as prose** (see the doc
+comment at the top of `ledger.ts`): `plan/05-data-model.md` said "derive balance, don't
+store a counter that can drift" but didn't specify how correctness holds under real
+concurrent access. The answer used here: every ledger operation takes
+`SELECT ... FOR UPDATE` on the account row before computing the derived balance, so
+Postgres serializes concurrent operations on the *same* account while leaving different
+accounts fully independent. This is proven, not assumed (see bug #1 above).
+
+**Next step:** the executor — `validate args → estimate cost → reserve → call upstream →
+capture/release`, then wire it behind `POST /v1/run`, `GET /v1/runs`, `GET /v1/runs/{id}`,
+`GET /v1/wallet/balance`, `GET /v1/wallet/activities`. That's what closes the two
+remaining unchecked boxes above.
 
 **Design decisions locked in before writing code:**
 - Concurrency safety via a single atomic `UPDATE accounts SET ... WHERE available >= $amount`
