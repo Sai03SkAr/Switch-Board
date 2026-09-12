@@ -1,0 +1,61 @@
+# ⚠️ Written carefully against the exact commands verified locally (npm ci, db:migrate,
+# db:seed, dev:api all work against a real Postgres — see PROGRESS.md Phase 0-4), but
+# `docker compose up` itself has NOT been run — no Docker is available in the environment
+# this was built in. Verify this actually works before relying on the self-host promise
+# in plan/03-positioning.md / plan/09-risks.md. If something's wrong, it's most likely a
+# path or a missing wait-for-postgres step — see the `migrate` service's `depends_on`
+# healthcheck below, which is the part most likely to need adjustment on a real run.
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16 # NOT the plain postgres image — pgvector must be
+                                    # compiled in; the standard image doesn't have it.
+    environment:
+      POSTGRES_USER: switchboard
+      POSTGRES_PASSWORD: switchboard
+      POSTGRES_DB: switchboard
+    ports:
+      - "5432:5432"
+    volumes:
+      - switchboard-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U switchboard"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  migrate:
+    build: .
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://switchboard:switchboard@postgres:5432/switchboard
+    command: >
+      sh -c "npx tsx packages/db/src/migrate.ts && npx tsx packages/db/src/seed/run.ts"
+
+  api:
+    build: .
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      DATABASE_URL: postgresql://switchboard:switchboard@postgres:5432/switchboard
+      PORT: 3000
+    ports:
+      - "3000:3000"
+    command: ["npx", "tsx", "apps/api/src/server.ts"]
+
+  mcp:
+    build: .
+    depends_on:
+      - api
+    environment:
+      SWITCHBOARD_API_URL: http://api:3000
+      MCP_PORT: 3001
+    ports:
+      - "3001:3001"
+    command: ["npx", "tsx", "apps/mcp/src/server.ts"]
+
+volumes:
+  switchboard-postgres-data:

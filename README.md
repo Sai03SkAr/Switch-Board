@@ -6,10 +6,12 @@ can't spend past. Full planning set (teardown, architecture, roadmap) lives in
 [`plan/`](plan/README.md); a living account of what's actually built, phase by phase,
 lives in [`PROGRESS.md`](PROGRESS.md).
 
-**Status: Phases 1–4 complete** — catalogue, discovery, ledger, policy engine, MCP
-server, and CLI are all real, tested, and verified against a live Postgres. Read
-[PROGRESS.md](PROGRESS.md) for exactly what that means, including four real bugs found
-and fixed by actually running the code rather than trusting it because tests were green.
+**Status: Phases 1–4 complete, Phase 5 mostly complete** — catalogue, discovery, ledger,
+policy engine, MCP server, and CLI are all real, tested, and verified against a live
+Postgres. [ARCHITECTURE.md](ARCHITECTURE.md) explains the decisions worth defending;
+[TESTING.md](TESTING.md) explains what the tests actually prove. Read
+[PROGRESS.md](PROGRESS.md) for exactly what's built, including real bugs found and fixed
+by actually running the code rather than trusting it because tests were green.
 
 ## What's real right now
 
@@ -90,6 +92,15 @@ running API + MCP server) if they can find one, and skip cleanly if they can't:
 npm test
 ```
 
+## Self-hosting (Docker)
+
+```bash
+docker compose up
+```
+
+⚠️ **Written, not verified** — no Docker was available in the environment this was built
+in. Check [PROGRESS.md](PROGRESS.md)'s Phase 5 section before relying on this.
+
 ## ⚠️ Embeddings are a placeholder
 
 `packages/core/src/embeddings.ts` ships a dependency-free, zero-cost hashed bag-of-words
@@ -109,10 +120,12 @@ packages/db         Postgres schema, migrations, seed data (real providers)
 packages/shared     Money utilities (integer micro-dollars, never floats)
 plan/               Full planning set — read plan/README.md first
 PROGRESS.md         Phase-by-phase build log — what's real, what's next, real bugs found
+ARCHITECTURE.md     The decisions worth defending, and the bugs that shaped them
+TESTING.md          What each test proves, including the concurrency and e2e tests
 ```
 
-## Next: Phase 5
+## Next: Phase 6
 
-Making the engineering legible for a portfolio audience: CI, `ARCHITECTURE.md`, seeded
-demo data, a recorded demo. See [plan/07-roadmap.md](plan/07-roadmap.md) and
-[PROGRESS.md](PROGRESS.md) for exactly where things stand.
+The demo — see [plan/07-roadmap.md](plan/07-roadmap.md) and [PROGRESS.md](PROGRESS.md)
+for exactly where things stand, including the one thing from Phase 5
+(`docker compose up`) that's written but not yet verified.

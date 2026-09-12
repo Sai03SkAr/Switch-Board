@@ -1,0 +1,58 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    # pgvector's own published image, not the plain postgres image — the extension has
+    # to be present in the container from the start; `CREATE EXTENSION vector` cannot
+    # install it into a stock postgres image that never compiled it in.
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: switchboard
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/switchboard
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - run: npm ci
+
+      - run: npm run db:migrate
+      - run: npm run db:seed
+
+      # Runs unit tests, real-Postgres integration tests (ledger, discovery, policy,
+      # executor), and the 1,000-concurrent-reserve stress test — all against this
+      # job's real Postgres service container, not mocks.
+      - run: npm test
+
+      # The MCP and CLI e2e suites need the API (and for MCP, the MCP server) actually
+      # running — they skip cleanly if unreachable, matching every other integration
+      # test in this project, but boot both here so CI exercises them for real.
+      - name: Start API and MCP servers
+        run: |
+          npx tsx apps/api/src/server.ts &
+          npx tsx apps/mcp/src/server.ts &
+          npx wait-on http://127.0.0.1:3000/healthz http://127.0.0.1:3001
+
+      - run: npm test -- apps/mcp/test/mcp.e2e.test.ts apps/cli/test/cli.e2e.test.ts

@@ -10,12 +10,22 @@ and treat this file as needing an update.
 
 ## Right now
 
-**Phase:** 4 (MCP server & CLI) — **✅ COMPLETE.** Moving to Phase 5 (make it legible) next.
-**Last verified state:** 71/71 tests passing, live against local Postgres. Verified with
-a REAL MCP protocol client (not a mock) doing a genuine discover → inspect → run round
-trip through a live server against a live upstream API, and a REAL `sw` CLI subprocess
-exercising the identical flow plus budgets and wallet management. Database left
-completely clean after every run.
+**Phase:** 5 (make it legible) — **mostly complete**, one item genuinely unverified (see
+below). Moving to Phase 6 (the demo) next.
+**Last verified state:** 71/71 tests passing (61 when the API/MCP servers aren't running
+— the other 10 skip cleanly rather than fail, which is correct). Database left
+completely clean after every run, confirmed across many consecutive runs.
+
+**⚠️ One thing genuinely not verified: `docker compose up`.** No Docker is available in
+the environment this was built in (confirmed: `docker`/`docker-compose` both absent).
+`Dockerfile` and `docker-compose.yml` were written carefully against the exact commands
+already verified locally (`npm ci`, `db:migrate`, `db:seed`, `dev:api` all proven to work
+against a real Postgres), but the compose file itself has never actually been run. **This
+needs a real check on a machine with Docker before the self-host promise in
+`plan/03-positioning.md`/`plan/09-risks.md` can be claimed as true**, not just plausible.
+If something's wrong, the most likely spot is the `migrate` service's
+`depends_on: condition: service_completed_successfully` — that's the part of the compose
+file with the least precedent to check against.
 
 ## How to resume in a fresh session
 
@@ -265,8 +275,41 @@ DATABASE_URL="postgresql://localhost/switchboard" npm run dev:api   # terminal 1
 npx tsx apps/mcp/src/server.ts                                       # terminal 2, port 3001
 ```
 
-### ⬜ Phase 5 — Make the engineering legible
-Not started. CI config, `ARCHITECTURE.md`, `TESTING.md`, seeded demo data, README polish.
+### 🔶 Phase 5 — Make the engineering legible — MOSTLY COMPLETE
+
+**Goal (from `plan/07-roadmap.md`):** CI, `ARCHITECTURE.md`, `TESTING.md`, seeded demo
+data (already existed from Phase 1), self-host `docker compose up`, README polish.
+
+**Done:**
+- `.github/workflows/ci.yml` — Postgres service using `pgvector/pgvector:pg16` (the
+  plain `postgres` image doesn't have the extension compiled in), runs migrate → seed →
+  full test suite → boots both the API and MCP servers via `wait-on` → runs the e2e
+  suites against them for real. **Not yet verified as an actual passing GitHub Actions
+  run** — no `gh` CLI or token available in this environment to check. Its *logic* was
+  validated as rigorously as possible without GitHub itself: ran the exact same sequence
+  (fresh `createdb`, migrate, seed, full suite) against a genuinely empty local database
+  to confirm all 4 migrations apply cleanly in order from zero — they'd only ever been
+  applied incrementally to the same dev DB before, which is a real gap this closed.
+  **Check the Actions tab after this push.**
+- [`ARCHITECTURE.md`](ARCHITECTURE.md) — the decisions worth defending in an interview:
+  why `SELECT ... FOR UPDATE`, why every transaction sums to exactly zero with no
+  exceptions, why free calls skip the ledger entirely, why RRF instead of a raw-score
+  blend, why the policy engine derives spend instead of caching it. Each tied back to the
+  real bug that shaped it, not written as if the design were obvious from the start.
+- [`TESTING.md`](TESTING.md) — explains the concurrency test and how it was verified
+  (temporarily broken, confirmed to fail, restored), the e2e tests and what real bugs
+  they caught, and — deliberately included rather than quietly omitted — a false-alarm
+  investigation into apparent test-cleanup debris that turned out to be leftover
+  manual-debugging residue, not a real bug, including the wrong fix that was drafted and
+  reverted before the real cause was found.
+- `Dockerfile` + `docker-compose.yml` + `.dockerignore` — see the ⚠️ at the top of this
+  file. Written, not verified.
+- README updated: status line now mentions Phase 5, links `ARCHITECTURE.md`/`TESTING.md`,
+  adds a self-host section (flagged with the same ⚠️ as above), "Next" points to Phase 6.
+
+**Not done, and being explicit about why:** a demo GIF in the README's first screen —
+that's Phase 6's job once there's something to record, and putting a placeholder in now
+would be worse than waiting.
 
 ### ⬜ Phase 6 — The demo
 Not started. **Flag for the user now:** I can write a demo *script* (exact commands, exact
