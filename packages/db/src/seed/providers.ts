@@ -12,6 +12,10 @@ export interface SeedProvider {
   resale_allowed: boolean;
   resale_note: string;
   tos_url: string;
+  /** Explicit, reviewed exception to the SSRF guard in packages/core/src/upstream.ts —
+   * only for a provider genuinely meant to run on localhost. Defaults false; every
+   * provider needs a human to flip it, same discipline as resale_allowed. */
+  allow_local_target?: boolean;
 }
 
 export const SEED_PROVIDERS: SeedProvider[] = [
@@ -93,5 +97,6 @@ export const SEED_PROVIDERS: SeedProvider[] = [
     resale_note:
       "AGPLv3, self-hostable. Running it yourself means there is no third-party provider ToS to violate — you're the operator, not a reseller of someone else's hosted service.",
     tos_url: "https://libretranslate.com/",
+    allow_local_target: true, // deliberately self-hosted at localhost — see upstream.ts's SSRF guard
   },
 ];

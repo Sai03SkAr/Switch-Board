@@ -10,11 +10,12 @@ and treat this file as needing an update.
 
 ## Right now
 
-**Phase:** 5 (make it legible) — **mostly complete**, one item genuinely unverified (see
-below). Moving to Phase 6 (the demo) next.
-**Last verified state:** 71/71 tests passing (61 when the API/MCP servers aren't running
-— the other 10 skip cleanly rather than fail, which is correct). Database left
-completely clean after every run, confirmed across many consecutive runs.
+**Phase:** 7–8 substantially complete (license, contributing guide, SSRF guard, load
+numbers, security doc all real and tested). **Phase 6 (the demo) is the one phase left
+that genuinely needs you** — see that section below, not skipped by oversight.
+**Last verified state:** 77/77 tests passing with both servers running (67 when they
+aren't — the other 10 skip cleanly, which is correct). Database left completely clean
+after every run, confirmed across many consecutive runs.
 
 **⚠️ One thing genuinely not verified: `docker compose up`.** No Docker is available in
 the environment this was built in (confirmed: `docker`/`docker-compose` both absent).
@@ -311,18 +312,64 @@ data (already existed from Phase 1), self-host `docker compose up`, README polis
 that's Phase 6's job once there's something to record, and putting a placeholder in now
 would be worse than waiting.
 
-### ⬜ Phase 6 — The demo
-Not started. **Flag for the user now:** I can write a demo *script* (exact commands, exact
-expected output) and a text/GIF-storyboard, but I cannot record an actual screen-capture
-video — that needs a human at a terminal. This will be called out explicitly again when
-this phase is reached, not left implicit.
+### ⬜ Phase 6 — The demo — GENUINELY NEEDS YOU
 
-### ⬜ Phase 7 — Open source polish
-Not started. License choice, `CONTRIBUTING.md`, issue templates.
+**Not started, and can't be finished without you at a terminal.** I can (and did, back
+in Phase 0's positioning work) write the exact demo script — commands, expected output,
+what to show in what order. I cannot record a screen-capture video; that's not something
+achievable in this environment regardless of how much of the rest got built. When you're
+ready, the script to follow is in [`plan/03-positioning.md`](plan/03-positioning.md)'s
+"the demo that sells it" section, and the specific numbers it should show are all real
+now: try `sw run` on a $774-capped session and watch it stop at exactly the 3rd call
+(this is literally `policy.test.ts`'s headline test, performed live instead of asserted).
 
-### ⬜ Phase 8 — Hardening worth showing
-Not started. Load-test numbers published in README, OpenTelemetry traces, SSRF guards,
-the prompt-injection boundary from `plan/09-risks.md` R5.
+### ✅ Phase 7 — Open source polish — substantially complete
+
+- [`LICENSE`](LICENSE) — Apache-2.0, matching the roadmap's original reasoning
+  ("favours adoption; AGPL's protection is moot without a business" — this is a
+  portfolio project, not a business, per the track decision in `plan/07-roadmap.md`)
+- [`CONTRIBUTING.md`](CONTRIBUTING.md) — the rules that actually protect the ledger's
+  invariants (never write to a balance directly, every transaction sums to zero, real
+  Postgres in tests, verify a regression test by watching it fail), plus a concrete
+  catalogue-submission checklist tied to the real `resale_allowed`/`validatePricingModel`
+  gates
+- `.github/ISSUE_TEMPLATE/` — bug report and catalogue-submission templates
+- `package.json` now has `license` and `repository` fields
+
+**Not done:** "self-host quickstart tested by someone who is not you" — can't be, for the
+same reason Phase 6 can't finish itself. This is the one place where `docker compose up`
+being unverified (see Phase 5) actually blocks a specific deliverable, not just a nice-to-have.
+
+### ✅ Phase 8 — Hardening worth showing — substantially complete
+
+- **Load-tested and published real numbers**: `packages/core/test/ledger.concurrency.test.ts`
+  already proves correctness under 1,000 concurrent requests; a separate one-off script
+  measured throughput — **~588 full reserve+capture cycles/sec** against local Postgres
+  with a 50-connection pool (2,000 cycles in 3,402ms). Published in the README and
+  [TESTING.md](TESTING.md), with the methodology and an explicit caveat that this is one
+  local measurement, not a benchmark suite.
+- **SSRF guard, real and tested** (`plan/09-risks.md` R6): `isBlockedUpstreamHost()` in
+  `packages/core/src/upstream.ts` blocks loopback/private/link-local hosts by default on
+  every real HTTP call. Building this surfaced a real conflict worth knowing about: it
+  would have silently broken LibreTranslate, which is *deliberately* self-hosted at
+  `localhost:5000` — fixed with a new `providers.allow_local_target` column
+  (migration `005_provider_local_target.sql`), an explicit, reviewed per-provider
+  exception, same discipline as `resale_allowed`, defaulting `false`. 6 new tests,
+  including one proving the actual SSRF-relevant property directly: an argument value
+  containing `"http://evil.internal"` can never inject a new host into a request, because
+  `substituteTemplate()` already URL-encodes every value — a property that existed
+  before this phase but had never been asserted as a real test until now.
+- [`SECURITY.md`](SECURITY.md) — the SSRF guard above, and the prompt-injection boundary
+  from `plan/09-risks.md` R5 (provider responses are untrusted data; what this project
+  enforces about that, and what it explicitly does not — DNS rebinding isn't covered,
+  and that's stated plainly rather than implied to be handled).
+
+**Not done, and being explicit about the tradeoff:** OpenTelemetry traces. This is real
+instrumentation work with no corresponding acceptance criterion forcing it, and the
+project already has strong observability into correctness (the test suite) if not yet
+into production request tracing. Reasonable to add later if this ever runs somewhere
+traces would actually get looked at; not worth the time against everything else in this
+list for a project that isn't deployed anywhere yet.
 
 ---
 
@@ -341,11 +388,22 @@ the prompt-injection boundary from `plan/09-risks.md` R5.
   (12 Sep 2026)** — they position against a competitive gap (agent spending controls) that
   AWS closed to GA a month ago. Not yet rewritten. Low priority unless the project pivots
   per `research.md`'s recommendation; flagging so it isn't forgotten.
+- **`docker compose up` is written but unverified** — no Docker in this environment.
+  See Phase 5/7 above.
+- **The CI workflow (`.github/workflows/ci.yml`) has never been confirmed to actually
+  pass on GitHub's infrastructure** — no `gh` CLI or token available to check. Its logic
+  was validated locally as thoroughly as possible (fresh-database migration test), but
+  "the YAML is correct" and "GitHub Actions ran it successfully" are different claims.
 
 ## What will need you, specifically, at some point
 
 Kept in one place so nothing surprises you later:
 - **Recording the actual demo video** (Phase 6) — I can script it precisely, not perform it
+- **Checking the Actions tab** after this gets pushed, to confirm CI actually passes —
+  the first thing worth doing, since it's a 30-second check
+- **Running `docker compose up` on a machine with Docker** — confirms or fixes the
+  self-host promise; the compose file's weakest-tested spot is probably the `migrate`
+  service's `depends_on: condition: service_completed_successfully`
 - **Any real paid-provider credentials** (Twilio, SendGrid, CoinGecko paid tier) if you
   ever want live (not mocked) execution against them
 - **The Monid account verification** — queued and ready, 5 minutes, whenever you want it

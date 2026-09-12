@@ -40,6 +40,19 @@ the database's own numbers agree independently (`SELECT COUNT(*), SUM(amount_mic
 FROM holds WHERE ... AND state = 'active'`), and the account's derived available balance
 is exactly zero afterward — not "close to zero."
 
+### Measured throughput
+
+The number in the README (~588 cycles/sec) comes from a separate, one-off script — not
+part of the automated suite, since a throughput number is a measurement to report, not a
+pass/fail assertion to enforce on every CI run — that fires 2,000 **full**
+`reserve()` → `capture()` cycles (the realistic hot path, not `reserve()` alone) at one
+account through the same `max: 50` pool, waits for all of them via `Promise.all`, and
+divides. On this machine: 2,000 cycles in 3,402ms, ~588 cycles/sec, ~1.7ms average
+wall-clock time per cycle under full concurrency. This is a single local measurement, not
+a benchmark suite — it says "the row-lock design doesn't fall over under load," not "this
+is the system's ceiling." Re-run it yourself before citing the number anywhere that
+matters more than a portfolio README.
+
 **How it was verified as a real regression test, not a lucky pass:** the
 `SELECT ... FOR UPDATE` lock in `reserve()` was temporarily removed, and the test was
 re-run three times. Each time, over-commit actually happened (109/1000 succeeded once —

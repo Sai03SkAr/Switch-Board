@@ -15,14 +15,14 @@ async function main() {
 
   for (const p of SEED_PROVIDERS) {
     const res = await pool.query(
-      `INSERT INTO providers (slug, name, base_url, auth_type, resale_allowed, resale_note, tos_url)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)
+      `INSERT INTO providers (slug, name, base_url, auth_type, resale_allowed, resale_note, tos_url, allow_local_target)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
        ON CONFLICT (slug) DO UPDATE SET
          name = EXCLUDED.name, base_url = EXCLUDED.base_url, auth_type = EXCLUDED.auth_type,
          resale_allowed = EXCLUDED.resale_allowed, resale_note = EXCLUDED.resale_note,
-         tos_url = EXCLUDED.tos_url
+         tos_url = EXCLUDED.tos_url, allow_local_target = EXCLUDED.allow_local_target
        RETURNING id`,
-      [p.slug, p.name, p.base_url, p.auth_type, p.resale_allowed, p.resale_note, p.tos_url]
+      [p.slug, p.name, p.base_url, p.auth_type, p.resale_allowed, p.resale_note, p.tos_url, p.allow_local_target ?? false]
     );
     providerIdBySlug.set(p.slug, res.rows[0].id);
     console.log(`provider  ${p.slug}`);

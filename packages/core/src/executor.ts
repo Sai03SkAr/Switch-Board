@@ -83,7 +83,7 @@ export async function run(
 ): Promise<RunResult> {
   const endpointRes = await pool.query(
     `SELECT e.id, e.input_schema, e.pricing, e.upstream_path, e.upstream_method, e.timeout_ms,
-            p.base_url
+            p.base_url, p.allow_local_target
      FROM endpoints e JOIN providers p ON p.id = e.provider_id
      WHERE e.id = $1`,
     [params.endpointId]
@@ -196,6 +196,7 @@ export async function run(
       url,
       body: method === "POST" ? params.args : undefined,
       timeoutMs: endpoint.timeout_ms,
+      allowLocalTarget: endpoint.allow_local_target,
     });
   } catch (err) {
     // Network error / timeout — the failure semantics table's rule applies: release the

@@ -22,8 +22,11 @@ by actually running the code rather than trusting it because tests were green.
   `score_breakdown` — the direct fix for the ranking gap in
   [plan/02-weaknesses.md](plan/02-weaknesses.md)
 - **A real double-entry ledger** — reserve/capture/release, proven under a genuine
-  1,000-concurrent-request stress test against live Postgres, idempotent, every
-  transaction's entries sum to exactly zero, verified independently after every test run
+  1,000-concurrent-request stress test against live Postgres (exactly 100/1,000 succeed
+  against a balance sized for 100, every time), idempotent, every transaction's entries
+  sum to exactly zero, verified independently after every test run. Measured throughput:
+  **~588 full reserve+capture cycles/sec** against a local Postgres instance with a
+  50-connection pool — see [TESTING.md](TESTING.md) for how this was measured
 - **A workspace → key → session → call budget hierarchy** — the project's headline
   differentiator over a single undifferentiated balance
   ([plan/03-positioning.md](plan/03-positioning.md)) — with a confirmation-token flow for
@@ -122,6 +125,9 @@ plan/               Full planning set — read plan/README.md first
 PROGRESS.md         Phase-by-phase build log — what's real, what's next, real bugs found
 ARCHITECTURE.md     The decisions worth defending, and the bugs that shaped them
 TESTING.md          What each test proves, including the concurrency and e2e tests
+SECURITY.md         The SSRF guard and the prompt-injection boundary — what's enforced,
+                    what isn't, and why
+CONTRIBUTING.md     Ledger/policy rules that actually matter, catalogue submission guide
 ```
 
 ## Next: Phase 6
