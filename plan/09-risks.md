@@ -29,7 +29,15 @@ money-transmitter laws all have regimes here.
 **Recommendation: build v1 BYOK-only.** It is faster, safer, and better positioned. Add
 managed balance in v2 only if users ask.
 
-### R2 — Provider ToS may forbid resale or proxying
+### R2 — Provider ToS may forbid resale or proxying — ✅ ADDRESSED 12 Sep 2026
+
+**Status: closed for Phase 1.** 11 real providers checked against their actual terms,
+primary-source, 12 Sep 2026. 8 confirmed clear, 2 one step from clear, 1 self-hosted —
+comfortably past the 8–12 needed for a starter catalogue. Full findings, including 3
+providers that looked "free and open" but explicitly ban resale, in
+[12-provider-shortlist.md](12-provider-shortlist.md).
+
+### R2 — Provider ToS may forbid resale or proxying (original writeup, for context)
 
 Reselling API access is prohibited by many providers' terms. Monid's catalogue leans on
 social-media scraping (TikTok, Instagram, Reddit) which sits on contested legal ground

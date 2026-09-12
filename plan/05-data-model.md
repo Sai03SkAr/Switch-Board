@@ -109,6 +109,28 @@ of Monid's variants, and every one must produce a dollar figure for a *specific*
 - `estimator: from_response` means actual cost is known only after the call; reserve
   `max_possible_micros` and capture the real figure.
 
+### Pricing model rules — refined by the Phase 0 spike (12 Sep 2026)
+
+Three rules added after spiking 3 real providers against this schema. Full derivation in
+[13-normalization-spike.md](13-normalization-spike.md).
+
+1. **`base_micros` always means "our actual cost per call," never the provider's
+   headline number.** Most real APIs bill via a monthly subscription with an included
+   quota, not true pay-as-you-go. For those, `base_micros = plan_cost / included_quota`,
+   computed at ingestion and re-derived whenever the plan changes.
+2. **For a `from_args` estimator, `max_possible_micros = unit_micros × the endpoint's
+   enforced maximum input size`** — and that maximum must be a real constraint in
+   `input_schema` (e.g. `maxLength`), checked by the executor's validation step, not just
+   written in a description. An endpoint with no enforceable input cap cannot be
+   onboarded — there is no way to bound the hold.
+3. **`TIERED` in v1 means tiered by this call's own argument size, not by cumulative
+   monthly volume.** Cumulative-volume tiering (the common SaaS pattern: price depends on
+   how much the whole workspace already used this billing period) needs a
+   `provider_usage_counters` table this schema does not yet have. Providers priced that
+   way are out of scope for v1's catalogue — not just for the ToS reasons in
+   [12-provider-shortlist.md](12-provider-shortlist.md), but because the metering model
+   doesn't support it correctly yet.
+
 ### Health telemetry
 
 ```sql

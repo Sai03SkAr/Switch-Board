@@ -20,19 +20,26 @@ Before building anything, kill the assumptions that would invalidate the plan.
 
 **Deliverable:** a decision memo, not code.
 
-- [ ] Re-run every item in the verification checklist in [02-weaknesses.md](02-weaknesses.md).
-      Record dates. Gaps that Monid 2.0 already closed are not your positioning.
-- [ ] Pick **8–12 candidate providers** with generous free tiers and *resale-permitting*
-      terms. Read the actual ToS. Record `resale_allowed` per provider.
-- [ ] Spike: normalize 3 different providers into one `ToolSpec`. If three cannot be
-      unified cleanly, the abstraction is wrong and everything downstream shifts.
-- [ ] Confirm the pricing model in [05-data-model.md](05-data-model.md) expresses all
-      three spiked providers, including at least one per-unit biller.
+- [x] **Done 8 Sep 2026.** Re-ran every item in [02-weaknesses.md](02-weaknesses.md).
+      All public gaps still open — see [10-verification-log.md](10-verification-log.md).
+- [x] **Done 12 Sep 2026.** 11 candidate providers checked against real ToS, primary
+      source. 8 confirmed clear, 2 near-clear, 1 self-hosted. Full record in
+      [12-provider-shortlist.md](12-provider-shortlist.md); 3 more that looked free but
+      explicitly ban resale are logged there too, so they don't get re-discovered later.
+- [x] **Done 12 Sep 2026.** Spiked 3 real providers (CoinGecko, ElevenLabs, Google Maps
+      Geocoding) against the `ToolSpec` schema — PER_CALL, PER_UNIT, TIERED. All three
+      fit, but the spike surfaced 3 real gaps, now fixed in the schema. Full writeup in
+      [13-normalization-spike.md](13-normalization-spike.md).
+- [x] Pricing model in [05-data-model.md](05-data-model.md) now expresses all three
+      spiked shapes correctly, including the per-unit biller (ElevenLabs, character-based).
 
-**Acceptance:** three providers expressed in one schema, with correct cost estimates for
-a specific set of arguments, on paper.
+**Acceptance — met:** three providers expressed in one schema, with correct cost
+estimates for a specific set of arguments, on paper. Two remaining gaps before Phase 1
+proper: `PER_RESULT` and `PER_UNIT_MATRIX` weren't spiked and should be checked against a
+real provider before either enters the catalogue; and 2 providers (ElevenLabs resale
+terms, Open-Meteo commercial proxying) need one more confirmation step before onboarding.
 
-**Do not skip this.** Phase 0 is the cheapest place to discover the plan is wrong.
+**Phase 0 is done as of 12 Sep 2026.** Ready to move into Phase 1.
 
 ---
 

@@ -24,6 +24,8 @@ pronunciation trade-off that was weighed and knowingly accepted.
 | 09 | [Risks](09-risks.md) | Legal, financial, and technical exposure — read before writing code |
 | 10 | [Verification log](10-verification-log.md) | Dated evidence for every competitor claim |
 | 11 | [Names](11-names.md) | Collision-checked name candidates |
+| 12 | [Provider shortlist](12-provider-shortlist.md) | Resale/ToS-verified providers — closes risk R2 |
+| 13 | [Normalization spike](13-normalization-spike.md) | 3 real providers vs. the pricing schema, 3 gaps found and fixed |
 
 ## The one-paragraph version
 
@@ -53,8 +55,11 @@ and a better portfolio piece than a broken clone of 1,608.
   are cut for a public repo + demo + case study, not a business. ~13.5 weeks part-time.
 - **Competitor gaps re-verified 8 Sep 2026** — all public gaps still open. See
   [10-verification-log.md](10-verification-log.md). Next check due 8 Oct 2026.
-- **Nothing implemented.** Planning only.
+- **Phase 0 complete as of 12 Sep 2026** — provider shortlist verified
+  ([12-provider-shortlist.md](12-provider-shortlist.md)), pricing schema spiked against 3
+  real providers with 3 gaps found and fixed ([13-normalization-spike.md](13-normalization-spike.md)).
+- **Nothing implemented yet.** Planning is done; Phase 1 (catalogue + discovery) is next.
 
-Start at [07-roadmap.md](07-roadmap.md) Phase 0 when you want to begin. On the portfolio
-track, Phase 0 shrinks to provider selection and the normalization spike — the competitor
-re-verification is already done.
+Two small items remain before Phase 1, both in [12-provider-shortlist.md](12-provider-shortlist.md):
+ElevenLabs' resale terms and Open-Meteo's commercial-tier proxying rights need one more
+confirmation step. Neither blocks starting Phase 1 with the 8 already-clear providers.
