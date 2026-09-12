@@ -3,7 +3,9 @@ import {
   estimateCost,
   amortizeSubscription,
   deriveMaxPossibleMicros,
+  validatePricingModel,
   UnsupportedPricingModelError,
+  PricingValidationError,
   type PricingModel,
 } from "../src/pricing.js";
 
@@ -101,6 +103,67 @@ describe("TIERED — Google Maps Geocoding shape (argument-size only, Spike Fix 
     expect(() => estimateCost(cumulativeVolumeTiered, { monthly_volume_bracket: 1 })).toThrow(
       UnsupportedPricingModelError
     );
+  });
+});
+
+describe("validatePricingModel — catches max_possible_micros drift before an endpoint is onboarded", () => {
+  it("accepts all three real fixtures spiked in 13-normalization-spike.md", () => {
+    const coinGecko: PricingModel = { model: "PER_CALL", currency: "USD", base_micros: 258, max_possible_micros: 258, estimator: "static" };
+    const elevenLabs: PricingModel = {
+      model: "PER_UNIT", currency: "USD", base_micros: 0, unit: "character", unit_micros: 200,
+      unit_divisor: 1, unit_count_field: "text", unit_count_source: "length", max_input_units: 5000,
+      max_possible_micros: deriveMaxPossibleMicros(200, 1, 5000), estimator: "from_args",
+    };
+    const geocoding: PricingModel = {
+      model: "TIERED", currency: "USD", base_micros: 0, unit: "request",
+      tier_basis: "argument_size", tier_field: "monthly_volume_bracket",
+      tiers: [{ up_to: 10_000, micros: 0 }, { up_to: 100_000, micros: 5000 }, { up_to: null, micros: 380 }],
+      max_possible_micros: 5000, estimator: "from_args",
+    };
+    expect(() => validatePricingModel(coinGecko)).not.toThrow();
+    expect(() => validatePricingModel(elevenLabs)).not.toThrow();
+    expect(() => validatePricingModel(geocoding)).not.toThrow();
+  });
+
+  it("rejects a PER_CALL endpoint whose max_possible_micros doesn't equal base_micros", () => {
+    const wrong: PricingModel = { model: "PER_CALL", currency: "USD", base_micros: 258, max_possible_micros: 999, estimator: "static" };
+    expect(() => validatePricingModel(wrong)).toThrow(PricingValidationError);
+  });
+
+  it("rejects a PER_UNIT endpoint with no max_input_units — the exact open-ended-hold bug from Gap 2", () => {
+    const unbounded: PricingModel = {
+      model: "PER_UNIT", currency: "USD", base_micros: 0, unit: "character",
+      unit_micros: 200, unit_divisor: 1, unit_count_field: "text", unit_count_source: "length",
+      max_input_units: null, max_possible_micros: 1_000_000, estimator: "from_args",
+    };
+    expect(() => validatePricingModel(unbounded)).toThrow(/no enforceable input cap/);
+  });
+
+  it("rejects a PER_UNIT endpoint whose max_possible_micros wasn't recomputed after unit_micros changed", () => {
+    const stale: PricingModel = {
+      model: "PER_UNIT", currency: "USD", base_micros: 0, unit: "character",
+      unit_micros: 400, // doubled from 200, but max_possible_micros below still reflects the old rate
+      unit_divisor: 1, unit_count_field: "text", unit_count_source: "length", max_input_units: 5000,
+      max_possible_micros: deriveMaxPossibleMicros(200, 1, 5000), // stale — should be 2,000,000 now
+      estimator: "from_args",
+    };
+    expect(() => validatePricingModel(stale)).toThrow(/doesn't match/);
+  });
+
+  it("rejects a TIERED endpoint whose max_possible_micros doesn't equal the priciest tier — the exact drift risk in the spike doc's own worked example", () => {
+    const driftedAfterEditingTiers: PricingModel = {
+      model: "TIERED", currency: "USD", base_micros: 0, unit: "request",
+      tier_basis: "argument_size", tier_field: "monthly_volume_bracket",
+      tiers: [{ up_to: 10_000, micros: 0 }, { up_to: 100_000, micros: 7000 }, { up_to: null, micros: 380 }], // 5000 -> 7000
+      max_possible_micros: 5000, // forgotten to update
+      estimator: "from_args",
+    };
+    expect(() => validatePricingModel(driftedAfterEditingTiers)).toThrow(/doesn't match/);
+  });
+
+  it("rejects negative max_possible_micros", () => {
+    const negative: PricingModel = { model: "PER_CALL", currency: "USD", base_micros: -1, max_possible_micros: -1, estimator: "static" };
+    expect(() => validatePricingModel(negative)).toThrow(/cannot be negative/);
   });
 });
 

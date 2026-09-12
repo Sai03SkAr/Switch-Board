@@ -1,4 +1,4 @@
-import { LocalHashEmbedding } from "@switchboard/core";
+import { LocalHashEmbedding, validatePricingModel } from "@switchboard/core";
 import { getPool, closePool } from "../client.js";
 import { SEED_PROVIDERS } from "./providers.js";
 import { SEED_ENDPOINTS } from "./endpoints.js";
@@ -31,6 +31,11 @@ async function main() {
   for (const e of SEED_ENDPOINTS) {
     const providerId = providerIdBySlug.get(e.provider_slug);
     if (!providerId) throw new Error(`Unknown provider_slug: ${e.provider_slug}`);
+
+    // Hard gate, same discipline as resale_allowed: an endpoint whose max_possible_micros
+    // doesn't match the rest of its pricing object cannot enter the catalogue. See
+    // validatePricingModel() in packages/core/src/pricing.ts for why this matters.
+    validatePricingModel(e.pricing);
 
     const embeddingText = [e.name, e.description, ...e.categories, ...e.example_queries].join(" ");
     const embedding = await embedder.embed(embeddingText);

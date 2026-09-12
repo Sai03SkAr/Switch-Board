@@ -41,26 +41,35 @@ export async function discover(
   const queryEmbedding = await embedder.embed(opts.query);
   const vectorLiteral = `[${queryEmbedding.join(",")}]`;
 
-  // BM25 ∪ vector kNN, union+dedupe done via UNION on endpoint id, capped at the pool size
-  // before ranking — see 04-architecture.md's "Retrieve" step.
+  // BM25 ∪ vector kNN, combined via Reciprocal Rank Fusion (RRF), not raw-score MAX.
+  //
+  // Bug fixed here: ts_rank_cd (BM25) is unbounded and typically ~0.01–0.5; vector
+  // similarity (1 - cosine_distance) is bounded to [-1, 1]. Combining those two numbers
+  // with MAX(fit), as an earlier version of this function did, silently let whichever
+  // retrieval method happened to produce a numerically larger raw score win — a
+  // meaningless comparison across incompatible scales, decided before any normalization
+  // ran. RRF sidesteps the whole problem: it only uses each method's RANK ORDER (1st,
+  // 2nd, 3rd...), never the raw score, so nothing needs to be on a comparable scale.
+  // score(d) = Σ 1/(k + rank), k=60 is the standard constant from the original RRF paper
+  // and what Elasticsearch/OpenSearch use for hybrid search for this exact reason.
+  const RRF_K = 60;
   const { rows } = await pool.query(
     `
     WITH bm25 AS (
-      SELECT e.id, ts_rank_cd(e.search_tsv, plainto_tsquery('english', $1)) AS fit
+      SELECT e.id, ROW_NUMBER() OVER (ORDER BY ts_rank_cd(e.search_tsv, plainto_tsquery('english', $1)) DESC) AS rank
       FROM endpoints e
       WHERE e.status = 'active' AND e.search_tsv @@ plainto_tsquery('english', $1)
-      ORDER BY fit DESC
       LIMIT $2
     ),
     vector AS (
-      SELECT e.id, 1 - (e.embedding <=> $3::vector) AS fit
+      SELECT e.id, ROW_NUMBER() OVER (ORDER BY e.embedding <=> $3::vector ASC) AS rank
       FROM endpoints e
       WHERE e.status = 'active'
-      ORDER BY e.embedding <=> $3::vector
       LIMIT $2
     ),
     pool AS (
-      SELECT id, MAX(fit) AS fit FROM (SELECT * FROM bm25 UNION ALL SELECT * FROM vector) u
+      SELECT id, SUM(1.0 / ($4 + rank)) AS fit
+      FROM (SELECT * FROM bm25 UNION ALL SELECT * FROM vector) u
       GROUP BY id
     )
     SELECT
@@ -76,19 +85,30 @@ export async function discover(
     JOIN providers p ON p.id = e.provider_id
     LEFT JOIN endpoint_health_7d h ON h.endpoint_id = e.id
     `,
-    [opts.query, RETRIEVAL_POOL_SIZE, vectorLiteral]
+    [opts.query, RETRIEVAL_POOL_SIZE, vectorLiteral, RRF_K]
   );
 
-  // Normalize BM25/vector fit scores (unbounded / -1..1 respectively) into a shared 0..1 band.
+  // RRF scores are already on one consistent scale (unlike the old MAX-of-raw-scores),
+  // so min-max normalizing them across this query's candidate set is now a principled
+  // operation rather than papering over an upstream scale mismatch.
   const fits = rows.map((r) => Number(r.fit));
   const minFit = Math.min(...fits, 0);
   const maxFit = Math.max(...fits, 1e-9);
   const normalizeFit = (f: number) => (maxFit === minFit ? 1 : (f - minFit) / (maxFit - minFit));
 
-  const priced = rows.map((r) => {
+  // Bug fixed here: estimateCost() can throw — e.g. a PER_UNIT/TIERED endpoint whose
+  // required arg the caller didn't supply (they were probably targeting a *different*
+  // candidate). That used to be unguarded inside this map, so one incompatible candidate
+  // threw and took the ENTIRE /v1/discover request down with it. Now it's caught and that
+  // one candidate is dropped from ranking instead — everything else still returns.
+  const priced = rows.flatMap((r) => {
     const pricing = r.pricing as PricingModel;
-    const estimate = estimateCost(pricing, opts.args);
-    return { row: r, pricing, estimate };
+    try {
+      const estimate = estimateCost(pricing, opts.args);
+      return [{ row: r, pricing, estimate }];
+    } catch {
+      return [];
+    }
   });
 
   const ranked = rankCandidates(

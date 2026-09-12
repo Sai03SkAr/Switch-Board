@@ -72,6 +72,78 @@ export function deriveMaxPossibleMicros(unitMicros: number, unitDivisor: number,
   return Math.round((unitMicros * maxInputUnits) / unitDivisor);
 }
 
+export class PricingValidationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "PricingValidationError";
+  }
+}
+
+/**
+ * Bug this catches: max_possible_micros is a bare number on the schema with nothing
+ * enforcing that it's actually consistent with the rest of the pricing object. It is the
+ * amount the ledger reserves before a call runs (Phase 2) — if it silently drifts below
+ * the true worst case (e.g. someone edits `tiers` or `unit_micros` later and forgets to
+ * recompute it), the hold under-reserves and a call can cost more than what was held
+ * against the balance. This must run on every endpoint before it enters the catalogue.
+ */
+export function validatePricingModel(pricing: PricingModel): void {
+  if (pricing.max_possible_micros < 0) {
+    throw new PricingValidationError("max_possible_micros cannot be negative");
+  }
+
+  switch (pricing.model) {
+    case "PER_CALL": {
+      if (pricing.max_possible_micros !== pricing.base_micros) {
+        throw new PricingValidationError(
+          `PER_CALL max_possible_micros (${pricing.max_possible_micros}) must equal base_micros (${pricing.base_micros}) — there is no variable component.`
+        );
+      }
+      break;
+    }
+
+    case "PER_UNIT": {
+      if (pricing.unit_micros == null) {
+        throw new PricingValidationError("PER_UNIT pricing requires unit_micros");
+      }
+      if (pricing.max_input_units == null) {
+        // This is Gap 2 from 13-normalization-spike.md, enforced: an open-ended per-unit
+        // biller cannot be onboarded because there is no way to bound the hold.
+        throw new PricingValidationError(
+          "PER_UNIT pricing requires max_input_units — an endpoint with no enforceable input cap cannot be onboarded (see 13-normalization-spike.md Gap 2)."
+        );
+      }
+      const divisor = pricing.unit_divisor ?? 1;
+      const expected = pricing.base_micros + deriveMaxPossibleMicros(pricing.unit_micros, divisor, pricing.max_input_units);
+      if (pricing.max_possible_micros !== expected) {
+        throw new PricingValidationError(
+          `PER_UNIT max_possible_micros (${pricing.max_possible_micros}) doesn't match base_micros + unit_micros × max_input_units / divisor (${expected}). Recompute it with deriveMaxPossibleMicros() rather than hand-entering it.`
+        );
+      }
+      break;
+    }
+
+    case "TIERED": {
+      if (!pricing.tiers || pricing.tiers.length === 0) {
+        throw new PricingValidationError("TIERED pricing requires a non-empty tiers array");
+      }
+      const worstTier = Math.max(...pricing.tiers.map((t) => t.micros));
+      const expected = pricing.base_micros + worstTier;
+      if (pricing.max_possible_micros !== expected) {
+        throw new PricingValidationError(
+          `TIERED max_possible_micros (${pricing.max_possible_micros}) doesn't match base_micros + the priciest tier (${expected}). If you edited \`tiers\`, max_possible_micros must be recomputed too.`
+        );
+      }
+      break;
+    }
+
+    case "PER_RESULT":
+    case "PER_UNIT_MATRIX":
+      // Not implemented yet (see estimateCost) — nothing to validate until they are.
+      break;
+  }
+}
+
 function countUnits(pricing: PricingModel, args: Record<string, unknown>): number {
   const field = pricing.unit_count_field;
   if (!field) {

@@ -19,8 +19,16 @@ Postgres.** No money moves yet — that's Phase 2 (the ledger).
   the price-blind ranking gap documented in [plan/02-weaknesses.md](plan/02-weaknesses.md)
 - **Normalized pricing** across `PER_CALL`, `PER_UNIT`, and `TIERED` models, each proven
   against a real provider's real published pricing in
-  [plan/13-normalization-spike.md](plan/13-normalization-spike.md)
-- 17 passing tests, including a reproduction of Monid's documented 26× ranking inversion
+  [plan/13-normalization-spike.md](plan/13-normalization-spike.md), with a
+  `validatePricingModel()` gate that catches `max_possible_micros` drifting out of sync
+  with the rest of a pricing object before it ever reaches the catalogue
+- **Reciprocal Rank Fusion** for combining BM25 and vector retrieval — not a raw-score
+  `MAX`, which silently favored whichever method's incompatible scale happened to be
+  numerically bigger
+- 25 passing tests, including a reproduction of Monid's documented 26× ranking inversion
+  and a live-Postgres integration test that deliberately poisons the catalogue with an
+  endpoint missing a required arg, to prove one bad candidate can't crash discovery for
+  everyone else
 
 ## Quickstart
 
@@ -43,7 +51,9 @@ curl -X POST http://127.0.0.1:3000/v1/discover \
   -d '{"query": "convert currency amount from dollars to euros", "limit": 3}'
 ```
 
-Run the test suite (no database needed — these are pure unit tests):
+Run the test suite. Most tests are pure unit tests and need no database; one integration
+test connects to a real local Postgres if it can find one (via `DATABASE_URL`, defaulting
+to `postgresql://localhost/switchboard`) and skips cleanly if it can't:
 
 ```bash
 npm test
