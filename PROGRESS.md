@@ -10,13 +10,12 @@ and treat this file as needing an update.
 
 ## Right now
 
-**Phase:** 3 (policy engine & budgets) — **✅ COMPLETE.** Moving to Phase 4 (MCP server & CLI) next.
-**Last verified state:** 61/61 tests passing, live against local Postgres, database left
-completely clean after the full suite runs. Full budget/confirmation flow manually
-verified against the running API over live HTTP — 409-with-token, single-use token
-enforcement, and 402-with-scope-details all confirmed working, including against a
-genuinely real (and genuinely failed, 401 — no paid credentials exist, expected) call to
-CoinGecko's live API, proving the zero-charge-on-failure guarantee holds even there.
+**Phase:** 4 (MCP server & CLI) — **✅ COMPLETE.** Moving to Phase 5 (make it legible) next.
+**Last verified state:** 71/71 tests passing, live against local Postgres. Verified with
+a REAL MCP protocol client (not a mock) doing a genuine discover → inspect → run round
+trip through a live server against a live upstream API, and a REAL `sw` CLI subprocess
+exercising the identical flow plus budgets and wallet management. Database left
+completely clean after every run.
 
 ## How to resume in a fresh session
 
@@ -211,8 +210,60 @@ and MCP server actually need to wire up.
 **Next step:** Phase 4 — the MCP server (three tools: `discover`, `inspect`, `run`) and
 the CLI, both as thin adapters over the REST API this and the previous two phases built.
 
-### ⬜ Phase 4 — MCP server & CLI
-Not started. Thin adapter over the REST API from Phases 1–3 — should be quick once they exist.
+### ✅ Phase 4 — MCP server & CLI — COMPLETE
+
+**Goal (from `plan/07-roadmap.md`):** exactly three MCP tools (`discover`, `inspect`,
+`run`) plus a `budget_status` resource, a CLI covering the same surface, install docs for
+Claude Code/Cursor. **All built, all verified against real running processes.**
+
+**All 3 acceptance criteria met:**
+- [x] "Claude Code connects and completes a real task end to end" — verified with the
+      **real `@modelcontextprotocol/sdk` client**, not a mock: `Client` +
+      `StreamableHTTPClientTransport` connected to a real running instance of this
+      server, which itself called the real REST API, which called the real local
+      Postgres and, for one test, the real live Frankfurter API — genuine discover →
+      inspect → run round trip, `apps/mcp/test/mcp.e2e.test.ts`
+- [x] "The agent visibly chooses between candidates and explains why" — `discover`'s
+      tool output includes `score_breakdown` (fit/reliability) and marks
+      `cheapest_viable`, in plain text, not buried in a JSON blob the agent has to parse
+- [x] "The agent hits a budget cap and reports it in plain language rather than
+      crashing" — proven at the protocol level: a 402 `BUDGET_EXCEEDED` from the REST
+      layer is caught inside the `run` tool and returned as a **normal, successful**
+      tool result (`isError` is falsy) whose text explains the guardrail — verified this
+      is NOT surfaced as an MCP protocol-level error, which was the actual bar this
+      criterion set
+
+**What exists:**
+- `apps/mcp/src/server.ts` — `McpServer` with exactly 3 tools, each calling the REST API
+  via `fetch()` (a thin adapter, not a second implementation of any business logic), plus
+  a `budget_status` `ResourceTemplate` resource so checking a balance costs no tool slot
+- `apps/cli/src/index.ts` — `sw discover/inspect/run/runs/budget/wallet/workspace-create`,
+  same thin-adapter principle, using `commander`
+- README updated with real `claude mcp add --transport http` install instructions —
+  **verified against the actual installed Claude Code CLI's own `--help` output**, not
+  asserted from memory
+- **71/71 tests passing** (5 new MCP protocol tests, 5 new CLI subprocess tests)
+
+**Two real bugs found and fixed while building this:**
+1. **The `budget_status` resource silently never worked** — passing a plain string
+   containing `"{workspace_id}"` to `registerResource()` registers that exact string as
+   a literal, non-templated URI; the MCP SDK only treats `{param}` as a real variable
+   when you construct an actual `ResourceTemplate`. Every lookup failed with "resource
+   not found" until fixed — caught by the e2e test, not by inspection.
+2. **`sw budget delete` silently failed on every call** — the CLI's shared `api()`
+   helper always sent `Content-Type: application/json`, even for a bodyless `DELETE`.
+   Fastify rejects that combination outright (`FST_ERR_CTP_EMPTY_JSON_BODY`, 400)
+   before the route handler ever runs. `GET` commands never showed the bug because
+   Fastify doesn't body-parse GET requests at all. Root-caused by reproducing with
+   `curl` using the exact same headers the CLI sent, fixed by only setting the header
+   when a body is actually present, and locked in with a dedicated regression test
+   (`apps/cli/test/cli.e2e.test.ts`) that spawns the real `sw` binary as a subprocess.
+
+**How to run both servers for manual testing:**
+```bash
+DATABASE_URL="postgresql://localhost/switchboard" npm run dev:api   # terminal 1, port 3000
+npx tsx apps/mcp/src/server.ts                                       # terminal 2, port 3001
+```
 
 ### ⬜ Phase 5 — Make the engineering legible
 Not started. CI config, `ARCHITECTURE.md`, `TESTING.md`, seeded demo data, README polish.
