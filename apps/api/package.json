@@ -1,0 +1,11 @@
+{
+  "name": "@switchboard/api",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "src/server.ts",
+  "dependencies": {
+    "@switchboard/core": "*",
+    "@switchboard/db": "*",
+    "fastify": "^5.12.4"
+  }
+}
